@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     NAV_TIMEOUT_MS: int = 60000
     WAIT_NETWORK_IDLE_MS: int = 5000
 
+    # Comma-separated substrings or regex patterns to whitelist endpoints
+    ENDPOINT_WHITELIST: str | None = None
+
     TELEGRAM_BOT_TOKEN: str | None = None
     TELEGRAM_ADMIN_IDS: str | None = None  # comma-separated
 

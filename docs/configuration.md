@@ -8,6 +8,7 @@
 - USER_AGENT: переопределение User-Agent (опционально)
 - NAV_TIMEOUT_MS: таймаут навигации Playwright
 - WAIT_NETWORK_IDLE_MS: ожидание тишины в сети после загрузки
+- ENDPOINT_WHITELIST: список подстрок/regex через запятую для отбора нужных API-эндпоинтов
 - TELEGRAM_BOT_TOKEN: токен бота
 - TELEGRAM_ADMIN_IDS: список админов через запятую
 

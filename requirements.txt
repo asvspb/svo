@@ -3,3 +3,7 @@ playwright>=1.46.0
 pydantic>=2.9
 pydantic-settings>=2.6
 aiogram>=3.4.1
+# Geospatial stack for Stage 2
+shapely>=2.0
+geopandas>=0.14
+pyogrio>=0.9
