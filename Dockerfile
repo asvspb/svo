@@ -1,5 +1,5 @@
 # Base image with Playwright and browsers preinstalled (Chromium)
-FROM mcr.microsoft.com/playwright/python:latest
+FROM mcr.microsoft.com/playwright/python:v1.57.0-jammy
 
 WORKDIR /app
 
