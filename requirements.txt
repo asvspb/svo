@@ -7,3 +7,5 @@ aiogram>=3.4.1
 shapely>=2.0
 geopandas>=0.14
 pyogrio>=0.9
+# Optional reverse geocoding
+geopy>=2.4
