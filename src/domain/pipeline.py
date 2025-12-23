@@ -6,6 +6,8 @@ import json
 
 from src.domain.geo_changes import compute_changes, ChangeItem
 from src.domain.nearest import load_gazetteer_csv, nearest_from_gazetteer, reverse_geocode_geopy
+from src.reporting.report_generator import build_telegram_report
+from src.db.dao import insert_changes, insert_report
 
 CLASSES = ("occupied", "gray")
 
@@ -27,11 +29,13 @@ def compare_latest(data_root: str, *, gazetteer_csv: Optional[str] = None) -> li
     all_items: list[ChangeItem] = []
     gaz_gdf = load_gazetteer_csv(gazetteer_csv) if gazetteer_csv else None
 
+    selected: dict[str, tuple[Path, Path]] = {}
     for clazz in CLASSES:
         files = _find_layer_files(data_root, clazz)
         if len(files) < 2:
             continue
         prev, curr = files[-2], files[-1]
+        selected[clazz] = (prev, curr)
         items = compute_changes(str(prev), str(curr))
         # enrich items: set status already contains gained/lost; fill settlement via gazetteer or reverse geocoding
         for it in items:

@@ -65,12 +65,16 @@ def create_dispatcher() -> Dispatcher:  # type: ignore[valid-type]
 
     @dp.message(Command("report"))
     async def cmd_report(msg: Message):  # type: ignore[valid-type]
-        text = await generate_and_send_report(
-            data_root=settings.DATA_ROOT,
-            recipients_from_env=False,
-            extra_chat_ids=[msg.chat.id],
-        )
-        # echo text just in case
+        # Try DB latest report first
+        from src.db.dao import get_latest_report
+        text = get_latest_report()
+        if not text:
+            # Fallback on-the-fly generation
+            text = await generate_and_send_report(
+                data_root=settings.DATA_ROOT,
+                recipients_from_env=False,
+                extra_chat_ids=[msg.chat.id],
+            )
         await msg.answer(text)
 
     return dp

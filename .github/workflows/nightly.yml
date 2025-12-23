@@ -1,0 +1,97 @@
+name: Nightly Pipeline
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * *'
+
+jobs:
+  nightly:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: example
+          MYSQL_DATABASE: deepstate
+          MYSQL_USER: app
+          MYSQL_PASSWORD: app_pass
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -u root --password=example"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install playwright
+          python -m playwright install --with-deps chromium
+
+      - name: Wait for MySQL to be ready
+        run: |
+          for i in {1..30}; do
+            if mysqladmin ping -h 127.0.0.1 -u root --password=example --silent; then
+              echo "MySQL is up"; break; fi; sleep 2; done
+
+      - name: Configure env
+        run: |
+          echo "ENV=prod" >> $GITHUB_ENV
+          echo "HEADLESS=true" >> $GITHUB_ENV
+          echo "NAV_TIMEOUT_MS=60000" >> $GITHUB_ENV
+          echo "WAIT_NETWORK_IDLE_MS=5000" >> $GITHUB_ENV
+          echo "DATA_ROOT=data" >> $GITHUB_ENV
+          echo "MYSQL_HOST=127.0.0.1" >> $GITHUB_ENV
+          echo "MYSQL_PORT=3306" >> $GITHUB_ENV
+          echo "MYSQL_DATABASE=deepstate" >> $GITHUB_ENV
+          echo "MYSQL_USER=root" >> $GITHUB_ENV
+          echo "MYSQL_PASSWORD=example" >> $GITHUB_ENV
+          echo "SQLALCHEMY_ECHO=false" >> $GITHUB_ENV
+
+      - name: Run scraper (collect daily layers)
+        env:
+          ENV: ${{ env.ENV }}
+          HEADLESS: ${{ env.HEADLESS }}
+          NAV_TIMEOUT_MS: ${{ env.NAV_TIMEOUT_MS }}
+          WAIT_NETWORK_IDLE_MS: ${{ env.WAIT_NETWORK_IDLE_MS }}
+        run: |
+          python scraper.py
+
+      - name: Apply DB migrations
+        env:
+          MYSQL_HOST: ${{ env.MYSQL_HOST }}
+          MYSQL_PORT: ${{ env.MYSQL_PORT }}
+          MYSQL_DATABASE: ${{ env.MYSQL_DATABASE }}
+          MYSQL_USER: ${{ env.MYSQL_USER }}
+          MYSQL_PASSWORD: ${{ env.MYSQL_PASSWORD }}
+          SQLALCHEMY_ECHO: ${{ env.SQLALCHEMY_ECHO }}
+        run: |
+          python scripts/db_upgrade.py
+
+      - name: Persist latest changes and report
+        env:
+          MYSQL_HOST: ${{ env.MYSQL_HOST }}
+          MYSQL_PORT: ${{ env.MYSQL_PORT }}
+          MYSQL_DATABASE: ${{ env.MYSQL_DATABASE }}
+          MYSQL_USER: ${{ env.MYSQL_USER }}
+          MYSQL_PASSWORD: ${{ env.MYSQL_PASSWORD }}
+          SQLALCHEMY_ECHO: ${{ env.SQLALCHEMY_ECHO }}
+        run: |
+          python scripts/persist_latest.py --data-root data
+
+      - name: Upload artifacts (data folder)
+        uses: actions/upload-artifact@v4
+        with:
+          name: data-artifacts
+          path: data/**
+          if-no-files-found: ignore
