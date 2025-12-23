@@ -8,9 +8,10 @@ Usage:
 from __future__ import annotations
 from pydantic import Field
 try:
-    from pydantic_settings import BaseSettings
+    from pydantic_settings import BaseSettings, SettingsConfigDict
 except Exception:  # fallback if not installed
     from pydantic import BaseModel as BaseSettings  # type: ignore
+    SettingsConfigDict = dict  # type: ignore
 
 
 class Settings(BaseSettings):
@@ -31,9 +32,7 @@ class Settings(BaseSettings):
     REPORT_SCHEDULE_CRON: str | None = "0 21 * * *"  # daily at 21:00
     DATA_ROOT: str = "data"
 
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
+    model_config = SettingsConfigDict(env_file=".env", case_sensitive=False)
 
 
 settings = Settings()

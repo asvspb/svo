@@ -71,7 +71,7 @@ filterwarnings = [
   "error", # treat warnings as errors in CI; locally you can override
 ]
 markers = [
-  "slow: marks tests as slow (deselect with '-m "not slow"')",
+  "slow: marks tests as slow (deselect with '-m \"not slow\"')",
 ]
 
 [tool.coverage.run]

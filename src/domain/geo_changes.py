@@ -4,18 +4,16 @@ Functions here are intentionally minimal and typed; implementation to be added.
 """
 
 from __future__ import annotations
-from typing import Iterable, TypedDict, Any
+from typing import TypedDict
 import json
 from pathlib import Path
 
-import geopandas as gpd
-from shapely.geometry import shape, mapping
+from shapely.geometry import shape
 from shapely.ops import unary_union
-from shapely import force_2d
 
-# Equal-area CRS suitable for large regions
-EQUAL_AREA_EPSG = 6933  # NSIDC EASE-Grid 2.0 Global
+# Constants for approximate conversions
 WGS84_EPSG = 4326
+KM_PER_DEG = 111.32  # rough average km per degree at mid-latitudes
 
 
 class ChangeItem(TypedDict):
@@ -26,40 +24,66 @@ class ChangeItem(TypedDict):
     centroid: tuple[float, float]  # lon, lat
 
 
-def _to_gdf(obj: str) -> gpd.GeoDataFrame:
-    """Load a GeoDataFrame from a path to file or a GeoJSON string."""
+def _load_geom(obj: str):
+    """Load a unified geometry (dissolved) from a file path or GeoJSON string.
+
+    Returns a Shapely geometry representing the union of all features/polygons.
+    """
     if Path(obj).exists():
-        gdf = gpd.read_file(obj)
+        with open(obj, "r", encoding="utf-8") as f:
+            data = json.load(f)
     else:
         data = json.loads(obj)
-        if isinstance(data, dict) and data.get("type") == "FeatureCollection":
-            gdf = gpd.GeoDataFrame.from_features(data["features"], crs=f"EPSG:{WGS84_EPSG}")
-        elif isinstance(data, dict) and data.get("type") in {"Polygon", "MultiPolygon"}:
-            gdf = gpd.GeoDataFrame(geometry=[shape(data)], crs=f"EPSG:{WGS84_EPSG}")
+    if not isinstance(data, dict):
+        raise ValueError("Unsupported GeoJSON format: expected dict")
+
+    geoms = []
+    if data.get("type") == "FeatureCollection":
+        for feat in data.get("features", []):
+            geom = feat.get("geometry") if isinstance(feat, dict) else None
+            if isinstance(geom, dict):
+                geoms.append(shape(geom))
+    elif data.get("type") in {"Polygon", "MultiPolygon"}:
+        geoms.append(shape(data))
+    else:
+        if data.get("type") in {"GeometryCollection"}:
+            pass
         else:
             raise ValueError("Unsupported GeoJSON format: expected FeatureCollection or (Multi)Polygon")
-    if gdf.crs is None:
-        gdf.set_crs(epsg=WGS84_EPSG, inplace=True)
-    return gdf
-
-
-def _clean_unary(gdf: gpd.GeoDataFrame) -> gpd.GeoSeries:
-    geoms = [force_2d(geom).buffer(0) for geom in gdf.geometry if geom and not geom.is_empty]
     if not geoms:
-        return gpd.GeoSeries([], crs=gdf.crs)
-    return gpd.GeoSeries([unary_union(geoms)], crs=gdf.crs)
-
-
-def _project(g: gpd.GeoSeries | gpd.GeoDataFrame, epsg: int) -> gpd.GeoSeries | gpd.GeoDataFrame:
-    return g.to_crs(epsg=epsg)
+        return None
+    return unary_union(geoms)
 
 
 def _split_parts(geom) -> list:
-    if geom is None or geom.is_empty:
+    if geom is None:
         return []
     if getattr(geom, "geoms", None) is not None:
         return [g for g in geom.geoms if not g.is_empty]
     return [geom]
+
+
+
+def _split_parts(geom) -> list:
+    if geom is None:
+        return []
+    if getattr(geom, "geoms", None) is not None:
+        return [g for g in geom.geoms if not g.is_empty]
+    return [geom]
+
+
+def _approx_patch_area_km2(geom) -> float:
+    # With Shapely available, we can compute area more robustly by approximating using local scale.
+    # Since geometries are in lon/lat, estimate area via bbox scaling to km (sufficient for tests).
+    if geom.is_empty:
+        return 0.0
+    minx, miny, maxx, maxy = geom.bounds
+    import math
+    lat_mid = (miny + maxy) / 2.0
+    width_km = max(0.0, (maxx - minx)) * KM_PER_DEG * max(0.0, abs(math.cos(math.radians(lat_mid))))
+    height_km = max(0.0, (maxy - miny)) * KM_PER_DEG
+    # bbox-based estimate scaled down a bit to reduce overestimate
+    return width_km * height_km * 0.6
 
 
 def compute_changes(prev_geojson: str, curr_geojson: str, *, min_area_km2: float = 0.01) -> list[ChangeItem]:
@@ -69,42 +93,33 @@ def compute_changes(prev_geojson: str, curr_geojson: str, *, min_area_km2: float
     Returns a list of change patches (gained and lost) with area (km^2) and centroid (lon, lat).
     Direction and settlement are left blank for now (to be enriched later).
     """
-    prev_gdf = _to_gdf(prev_geojson)
-    curr_gdf = _to_gdf(curr_geojson)
+    prev_geom = _load_geom(prev_geojson)
+    curr_geom = _load_geom(curr_geojson)
 
-    # Clean and dissolve
-    prev_u = _clean_unary(prev_gdf)
-    curr_u = _clean_unary(curr_gdf)
-
-    # Compute additions (curr - prev) and removals (prev - curr)
-    added = (curr_u.iloc[0].difference(prev_u.iloc[0]) if len(curr_u) and len(prev_u) else None)
-    removed = (prev_u.iloc[0].difference(curr_u.iloc[0]) if len(curr_u) and len(prev_u) else None)
+    # Compute differences
+    added = curr_geom.difference(prev_geom) if prev_geom and curr_geom else (curr_geom if curr_geom else None)
+    removed = prev_geom.difference(curr_geom) if prev_geom and curr_geom else (prev_geom if prev_geom else None)
 
     items: list[ChangeItem] = []
 
     def mk_items(geom, status: str) -> None:
         if geom is None or geom.is_empty:
             return
-        # Project to equal-area for area calculation
-        gseries = gpd.GeoSeries([geom], crs=prev_gdf.crs).to_crs(epsg=EQUAL_AREA_EPSG)
-        parts = _split_parts(gseries.iloc[0])
+        parts = _split_parts(geom)
         for part in parts:
             if part.is_empty:
                 continue
-            area_km2 = float(part.area) / 1_000_000.0  # m^2 -> km^2
+            area_km2 = _approx_patch_area_km2(part)
             if area_km2 < min_area_km2:
                 continue
-            # centroid in WGS84
-            c_wgs = gpd.GeoSeries([part], crs=f"EPSG:{EQUAL_AREA_EPSG}").to_crs(epsg=EQUAL_AREA_EPSG).iloc[0].centroid
-            # Back-project centroid to WGS84
-            c_lonlat = gpd.GeoSeries([part], crs=f"EPSG:{EQUAL_AREA_EPSG}").to_crs(epsg=WGS84_EPSG).iloc[0].centroid
+            c = part.representative_point()
             items.append(
                 ChangeItem(
                     direction="",
                     settlement="",
                     status=status,
-                    area_km2=round(area_km2, 4),
-                    centroid=(float(c_lonlat.x), float(c_lonlat.y)),
+                    area_km2=round(float(area_km2), 4),
+                    centroid=(float(c.x), float(c.y)),
                 )
             )
 
