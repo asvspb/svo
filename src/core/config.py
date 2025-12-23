@@ -22,6 +22,9 @@ class Settings(BaseSettings):
 
     # Comma-separated substrings or regex patterns to whitelist endpoints
     ENDPOINT_WHITELIST: str | None = None
+    ENDPOINT_BLACKLIST: str | None = None
+    MIN_JSON_BYTES: int = 200  # ignore tiny payloads
+    SAVE_RAW_JSON: bool = False
 
     TELEGRAM_BOT_TOKEN: str | None = None
     TELEGRAM_ADMIN_IDS: str | None = None  # comma-separated

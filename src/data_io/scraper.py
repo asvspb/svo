@@ -47,10 +47,16 @@ def parse_whitelist(raw: str | None) -> list[re.Pattern[str]]:
     return patterns
 
 
-def url_allowed(url: str, patterns: Sequence[re.Pattern[str]]) -> bool:
-    if not patterns:
+def parse_blacklist(raw: str | None) -> list[re.Pattern[str]]:
+    return parse_whitelist(raw)
+
+
+def url_allowed(url: str, wl: Sequence[re.Pattern[str]], bl: Sequence[re.Pattern[str]]) -> bool:
+    if bl and any(pt.search(url) for pt in bl):
+        return False
+    if not wl:
         return True
-    return any(pt.search(url) for pt in patterns)
+    return any(pt.search(url) for pt in wl)
 
 
 async def run_deepstate_scraper(
@@ -95,11 +101,12 @@ async def run_deepstate_scraper(
 
         # Build combined allow predicate using whitelist and optional external filter
         wl_patterns = parse_whitelist(settings.ENDPOINT_WHITELIST)
+        bl_patterns = parse_blacklist(settings.ENDPOINT_BLACKLIST)
 
         def allow(u: str, s: int, h: dict[str, str] | None) -> bool:
             if response_filter and not response_filter(u, s, h):
                 return False
-            return url_allowed(u, wl_patterns)
+            return url_allowed(u, wl_patterns, bl_patterns)
 
         async def handle_response(response):
             try:
@@ -124,10 +131,24 @@ async def run_deepstate_scraper(
                 if not allowed:
                     return
                 if is_json_like:
-                    data = await response.json()
+                    # size guard: fetch text to check length then parse
+                    body_text = await response.text()
+                    if len(body_text.encode("utf-8")) < max(0, int(getattr(settings, "MIN_JSON_BYTES", 0))):
+                        return
+                    try:
+                        data = json.loads(body_text)
+                    except Exception:
+                        return
                     key = url.split("/")[-1].split("?")[0]
                     captured[key] = data
-                    logging.getLogger(__name__).debug("Captured", extra={"key": key, "url": url})
+                    logging.getLogger(__name__).debug("Captured", extra={"key": key, "url": url, "bytes": len(body_text)})
+
+                    # optionally save raw
+                    if bool(getattr(settings, "SAVE_RAW_JSON", False)):
+                        safe_url = re.sub(r"[^a-zA-Z0-9._-]", "_", url)[:200]
+                        raw_dir = out_base / "raw"
+                        raw_dir.mkdir(exist_ok=True)
+                        (raw_dir / f"{safe_url}.json").write_text(body_text, encoding="utf-8")
             except Exception as e:
                 logging.getLogger(__name__).warning("Response parse failed", extra={"error": str(e)})
 

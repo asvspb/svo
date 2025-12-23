@@ -9,6 +9,9 @@
 - NAV_TIMEOUT_MS: таймаут навигации Playwright
 - WAIT_NETWORK_IDLE_MS: ожидание тишины в сети после загрузки
 - ENDPOINT_WHITELIST: список подстрок/regex через запятую для отбора нужных API-эндпоинтов
+- ENDPOINT_BLACKLIST: исключающие подстроки/regex (имеют приоритет над whitelist)
+- MIN_JSON_BYTES: минимальный размер JSON-ответа в байтах, меньше — игнорировать
+- SAVE_RAW_JSON: сохранять сырые JSON-ответы для отладки (true/false)
 - TELEGRAM_BOT_TOKEN: токен бота
 - TELEGRAM_ADMIN_IDS: список админов через запятую
 

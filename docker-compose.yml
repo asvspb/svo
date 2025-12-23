@@ -11,6 +11,14 @@ services:
       - ./artifacts:/app/artifacts
     command: python scraper.py
 
+  report:
+    build: .
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    command: python scripts/run_daily_report.py
+
   # bot:
   #   build: .
   #   env_file:

@@ -15,8 +15,9 @@ RUN python -m pip install --upgrade pip && pip install -r requirements.txt
 COPY pyproject.toml .
 COPY src ./src
 COPY scraper.py ./
+COPY scripts ./scripts
 COPY docs ./docs
 COPY .env.example ./
 
-# Default command: run scraper entrypoint
-CMD ["python", "scraper.py"]
+# Default command: run daily report (can be overridden)
+CMD ["python", "scripts/run_daily_report.py", "--no-send"]
