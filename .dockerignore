@@ -1,0 +1,17 @@
+# Ignore local artifacts and caches
+.venv/
+__pycache__/
+*.pyc
+.mypy_cache/
+.ruff_cache/
+.git/
+.gitignore
+.qodo/
+.data/
+logs/
+artifacts/
+node_modules/
+*.log
+*.coverage
+htmlcov/
+.data/

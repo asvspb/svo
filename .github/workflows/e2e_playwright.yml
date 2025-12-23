@@ -1,0 +1,27 @@
+name: E2E Playwright (Optional)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * *'
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest
+          pip install playwright
+          python -m playwright install --with-deps chromium
+      - name: Run e2e (placeholder)
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: |
+          echo "No e2e tests yet. Add tests/e2e/ later."

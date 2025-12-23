@@ -1,0 +1,20 @@
+version: "3.9"
+
+services:
+  scraper:
+    build: .
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./artifacts:/app/artifacts
+    command: python scraper.py
+
+  # bot:
+  #   build: .
+  #   env_file:
+  #     - .env
+  #   command: python -m src.bot.app
+  #   depends_on:
+  #     - scraper
