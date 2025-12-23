@@ -28,6 +28,8 @@ class Settings(BaseSettings):
 
     TELEGRAM_BOT_TOKEN: str | None = None
     TELEGRAM_ADMIN_IDS: str | None = None  # comma-separated
+    REPORT_SCHEDULE_CRON: str | None = "0 21 * * *"  # daily at 21:00
+    DATA_ROOT: str = "data"
 
     class Config:
         env_file = ".env"

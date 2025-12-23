@@ -48,3 +48,8 @@ docker run --rm \
 - .github/workflows/ci.yml — линт, типы, тесты
 - .github/workflows/e2e_playwright.yml — e2e (опционально, по расписанию/ручной запуск)
 - .github/workflows/docker-publish.yml — публикация образа в GHCR
+
+## Telegram-бот
+- Команды: /start (подписка), /stop (отписка), /report (получить отчёт сейчас)
+- Запуск локально: `python scripts/run_bot.py`
+- Docker: `docker compose up -d bot` (нужен TELEGRAM_BOT_TOKEN в .env)

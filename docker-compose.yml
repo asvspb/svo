@@ -19,10 +19,14 @@ services:
       - ./data:/app/data
     command: python scripts/run_daily_report.py
 
-  # bot:
-  #   build: .
-  #   env_file:
-  #     - .env
-  #   command: python -m src.bot.app
-  #   depends_on:
-  #     - scraper
+  bot:
+    build: .
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    command: python scripts/run_bot.py
+    depends_on:
+      - scraper
+    ports:
+      - "26019:26019"

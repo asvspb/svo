@@ -1,0 +1,173 @@
+План интеграции MySQL: архитектура, схема и процессы
+
+Цели интеграции
+- Централизованное хранение исторических данных (слои, изменения, отчёты)
+- Повышение надёжности и воспроизводимости пайплайна
+- Подготовка к агрегациям, аналитике и аудитам
+
+1. Общая архитектура
+- Источники: скрапер (Playwright) сохраняет слои (GeoJSON) и метаданные (манифест)
+- ETL:
+  - Extract: чтение сохранённых файлов layer_*.geojson и manifest JSON
+  - Transform: нормализация CRS, вычисление diff (compute_changes), обогащение НП
+  - Load: запись слоёв, “патчей изменений”, отчётов в MySQL
+- Доступ:
+  - Бот и REST/CLI читают агрегированные представления из БД
+  - Возможность ретро-расчёта отчётов за прошлые даты
+
+2. Схема БД (минимальный MVP)
+- tables
+  - dates (
+      id BIGINT PK AI,
+      date DATE UNIQUE,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  - layers (
+      id BIGINT PK AI,
+      class ENUM('occupied','gray','frontline') NOT NULL,
+      date_id BIGINT NOT NULL,
+      source_url VARCHAR(512) NULL,
+      geojson LONGBLOB NOT NULL, -- хранение исходного GeoJSON (сжато)
+      features_count INT,
+      checksum CHAR(64), -- sha256 для идемпотентности
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uk_layer (class, date_id),
+      FOREIGN KEY (date_id) REFERENCES dates(id)
+    )
+  - changes (
+      id BIGINT PK AI,
+      date_prev_id BIGINT NOT NULL,
+      date_curr_id BIGINT NOT NULL,
+      class ENUM('occupied','gray') NOT NULL,
+      status ENUM('gained','lost') NOT NULL,
+      area_km2 DOUBLE NOT NULL,
+      centroid_lon DOUBLE NOT NULL,
+      centroid_lat DOUBLE NOT NULL,
+      settlement VARCHAR(128) NULL,
+      settlement_distance_km DOUBLE NULL,
+      hash_key CHAR(64), -- для идемпотентных загрузок
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      KEY idx_changes_date_class (date_curr_id, class, status),
+      FOREIGN KEY (date_prev_id) REFERENCES dates(id),
+      FOREIGN KEY (date_curr_id) REFERENCES dates(id)
+    )
+  - reports (
+      id BIGINT PK AI,
+      date_curr_id BIGINT NOT NULL,
+      text MEDIUMTEXT NOT NULL,
+      top3_json MEDIUMTEXT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (date_curr_id) REFERENCES dates(id)
+    )
+  - subscribers (
+      id BIGINT PK AI,
+      chat_id BIGINT UNIQUE NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+
+Примечания:
+- GeoJSON можно хранить в LONGBLOB (gzip) или MEDIUMTEXT (gzip); чтение на аналитике через выгрузку.
+- Для поиска/аналитики геометрий в MySQL — ограничено; основной расчёт геометрии остаётся в Python (geopandas/shapely). 
+- Индексация по date/class/status обеспечит быстрые выборки для отчётов.
+
+3. Процесс загрузки (ETL)
+- Ingestion слоёв (layers):
+  1) Определить дату D по имени файла layer_<class>_YYYY_MM_DD.geojson
+  2) dates: upsert(D)
+  3) Прочитать файл, посчитать checksum (sha256), если такой класс+дата уже есть с тем же checksum — пропустить
+  4) Сжать (gzip) и сохранить geojson, установить features_count
+- Вычисление изменений (changes):
+  1) Для каждого класса взять (D-1, D) — последние две даты
+  2) compute_changes(prev, curr)
+  3) Для каждой записи сформировать hash_key (например: sha256(class|status|lon|lat|area|D)), вставить уникально
+- Формирование отчёта (reports):
+  1) Считать изменения за D
+  2) build_telegram_report -> text, top-3 -> JSON
+  3) Сохранить в reports
+
+4. Идемпотентность и повторяемость
+- hash_key на changes позволяет повторно прогонять пайплайн без дублей
+- checksum на layers предотвращает повторную загрузку
+- Все операции wrap в транзакции (InnoDB), с «вставить если нет» (INSERT IGNORE / ON DUPLICATE KEY UPDATE)
+
+5. Миграции и слой доступа
+- Использовать SQLAlchemy + Alembic для миграций
+- Слой DAO/репозиторий:
+  - write_layers(date, class, geojson, checksum)
+  - write_changes(date_prev, date_curr, class, list[ChangeItem])
+  - write_report(date_curr, text, top3_json)
+  - read_changes(date_curr, class)
+  - read_latest_report()
+
+6. Конфигурация подключения
+- .env:
+  - MYSQL_HOST, MYSQL_PORT, MYSQL_DB, MYSQL_USER, MYSQL_PASSWORD
+  - SQLALCHEMY_ECHO=false
+- DSN: mysql+aiomysql://user:pass@host:3306/db (async) или mysql+pymysql:// (sync)
+- Рекомендовано использовать пул соединений (sqlalchemy.engine.create_engine(pool_size, max_overflow))
+
+7. Производительность и хранение
+- Хранить исходные GeoJSON отдельно от агрегатов: layers.geojson (gzip)
+- Применять ретеншн-политику на сырые артефакты в файловой системе (например, хранить N дней)
+- Индексы: (date_curr_id, class, status) на changes, (class, date_id) на layers
+- При росте объёма — партиционирование по дате (партиции на месяц/квартал)
+
+8. Резервное копирование и отказоустойчивость
+- Бэкапы: mysqldump/Percona XtraBackup по расписанию
+- Репликация (опционально): primary → read replica для отчётных запросов
+- Мониторинг: метрики MySQL (threads, qps, slow queries)
+
+9. Docker/Compose
+- Добавить сервис mysql:
+  - image: mysql:8
+  - env: MYSQL_ROOT_PASSWORD, MYSQL_DATABASE, MYSQL_USER, MYSQL_PASSWORD
+  - volumes: mysql-data:/var/lib/mysql
+- Добавить init контейнер/скрипт миграций (alembic upgrade head) при старте
+- Пример compose:
+  services:
+    mysql:
+      image: mysql:8
+      environment:
+        MYSQL_ROOT_PASSWORD: example
+        MYSQL_DATABASE: deepstate
+        MYSQL_USER: app
+        MYSQL_PASSWORD: app_pass
+      ports:
+        - "3306:3306"
+      volumes:
+        - mysql-data:/var/lib/mysql
+    app:
+      build: .
+      depends_on: [mysql]
+      env_file: [.env]
+      command: alembic upgrade head && python scripts/run_daily_report.py
+  volumes:
+    mysql-data:
+
+10. Интеграция с пайплайном
+- Дополнить src/domain/pipeline.py шагами записи в БД после вычисления изменений
+- Добавить модуль src/db/ с клиентом SQLAlchemy и миграциями Alembic
+- Создать команды CLI:
+  - scripts/load_layers.py — загрузка слоёв в БД из data/
+  - scripts/compute_and_store_changes.py — пересчёт изменений и запись
+  - scripts/generate_report.py — хранение отчёта
+
+11. Безопасность
+- Хранить креды только в .env/секретах CI, не коммитить
+- Использовать роли с минимальными привилегиями (app — только SELECT/INSERT/UPDATE, без DROP)
+- Ограничить доступ к порту MySQL (локальная сеть/туннель)
+
+12. Пошаговый план внедрения
+- Шаг 1: Добавить docker-compose сервис mysql и .env переменные
+- Шаг 2: Подключить SQLAlchemy + Alembic, описать модели и миграции (dates, layers, changes, reports, subscribers)
+- Шаг 3: Реализовать DAO и идемпотентную загрузку layers
+- Шаг 4: Интегрировать compute_changes -> запись в changes и генерацию reports
+- Шаг 5: Обновить бот: читать последний отчёт из БД; fallback на on-the-fly
+- Шаг 6: Тесты интеграции (dockerized MySQL) + CI job
+- Шаг 7: Бэкапы, мониторинг, ретеншн
+
+13. Риски и альтернативы
+- MySQL ограничен в гео-операциях без специализированных расширений — основные расчёты лучше оставить в Python
+- Альтернатива для пространственных задач: PostGIS (PostgreSQL) — мощнее для гео-запросов; можно рассмотреть позже
+
+Конец плана.
