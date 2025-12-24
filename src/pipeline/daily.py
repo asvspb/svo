@@ -30,9 +30,10 @@ def _parse_admin_ids(raw: str | None) -> list[int]:
 async def send_report_via_bot(text: str, chat_ids: Sequence[int]) -> None:
     if not text or not chat_ids:
         return
-    if Bot is None or not settings.TELEGRAM_BOT_TOKEN:
+    # Telegram integration disabled: no bot token is configured in settings.
+    if Bot is None:
         return
-    bot = Bot(token=settings.TELEGRAM_BOT_TOKEN)  # type: ignore[call-arg]
+    return
     try:
         for chat_id in chat_ids:
             try:

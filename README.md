@@ -30,7 +30,28 @@ docker run --rm \
 Основные параметры:
 - HEADLESS — режим браузера (true/false)
 - NAV_TIMEOUT_MS, WAIT_NETWORK_IDLE_MS — тайминги Playwright
-- TELEGRAM_BOT_TOKEN — токен бота (для будущего этапа)
+## Загрузка истории в БД (backfill)
+
+1) Поднимите БД и примените миграции (или создайте таблицы):
+- MySQL через Docker: `docker compose up -d mysql`
+- Миграции: `python scripts/db_upgrade.py`
+
+2) Загрузите слои за период в таблицу `layers`:
+```bash
+# пример: период (формат YYYY_MM_DD)
+python scripts/backfill_layers.py --from 2024_01_01 --to 2024_01_31 --create-tables --skip-existing
+
+# пример: последние 7 дней
+python scripts/backfill_layers.py --days 7 --create-tables --skip-existing
+
+# пример: только occupied/gray
+python scripts/backfill_layers.py --days 30 --classes occupied,gray --create-tables --skip-existing
+```
+
+Подключение к БД:
+- по умолчанию используется MySQL из переменных `MYSQL_*`
+- либо можно указать `DATABASE_URL` (например, SQLite):
+  `DATABASE_URL=sqlite+pysqlite:///./deepstate.db python scripts/backfill_layers.py --days 30 --create-tables`
 
 ## Разработка
 - Установка pre-commit: `pip install pre-commit && pre-commit install`
@@ -52,4 +73,4 @@ docker run --rm \
 ## Telegram-бот
 - Команды: /start (подписка), /stop (отписка), /report (получить отчёт сейчас)
 - Запуск локально: `python scripts/run_bot.py`
-- Docker: `docker compose up -d bot` (нужен TELEGRAM_BOT_TOKEN в .env)
+- Docker: `docker compose up -d bot` (в текущей версии Telegram-бот отключён)

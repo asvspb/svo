@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     MIN_JSON_BYTES: int = 200  # ignore tiny payloads
     SAVE_RAW_JSON: bool = False
 
-    TELEGRAM_BOT_TOKEN: str | None = None
+    # Telegram integration is currently disabled (no token in settings)
     TELEGRAM_ADMIN_IDS: str | None = None  # comma-separated
     REPORT_SCHEDULE_CRON: str | None = "0 21 * * *"  # daily at 21:00
     DATA_ROOT: str = "data"

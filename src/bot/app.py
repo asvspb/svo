@@ -38,10 +38,7 @@ except Exception:  # pragma: no cover - optional dependency
 def create_bot() -> Bot:  # type: ignore[valid-type]
     if Bot is None:
         raise RuntimeError("aiogram is not installed")
-    token = settings.TELEGRAM_BOT_TOKEN or ""
-    if not token:
-        raise RuntimeError("TELEGRAM_BOT_TOKEN is not set")
-    return Bot(token=token)  # type: ignore[call-arg]
+    raise RuntimeError("Telegram bot is disabled in this build")
 
 
 def create_dispatcher() -> Dispatcher:  # type: ignore[valid-type]

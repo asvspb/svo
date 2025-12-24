@@ -21,7 +21,5 @@ jobs:
           pip install playwright
           python -m playwright install --with-deps chromium
       - name: Run e2e (placeholder)
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         run: |
           echo "No e2e tests yet. Add tests/e2e/ later."

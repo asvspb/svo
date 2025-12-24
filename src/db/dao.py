@@ -11,6 +11,22 @@ from sqlalchemy.orm import Session
 
 from .base import get_session_maker
 from .models import DateRef, Layer, Change, Report
+
+
+def _get_date_id(sess: Session, d: date) -> int | None:
+    row = sess.execute(select(DateRef.id).where(DateRef.date == d)).scalar_one_or_none()
+    return int(row) if row is not None else None
+
+
+def layer_exists(*, clazz: str, d: date) -> bool:
+    """Return True if layer(clazz, d) exists in DB."""
+    SessionLocal = get_session_maker()
+    with SessionLocal() as sess:
+        did = _get_date_id(sess, d)
+        if did is None:
+            return False
+        row = sess.execute(select(Layer.id).where(Layer.date_id == did, Layer.clazz == clazz)).scalar_one_or_none()
+        return row is not None
 from src.domain.geo_changes import ChangeItem
 
 

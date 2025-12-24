@@ -5,6 +5,8 @@ import re
 import json
 
 from src.domain.geo_changes import compute_changes, ChangeItem
+from src.data_io.history_index import load_index
+from src.data_io.history_fetcher import fetch_history_layer, save_layer_geojson
 from src.domain.nearest import load_gazetteer_csv, nearest_from_gazetteer, reverse_geocode_geopy
 from src.reporting.report_generator import build_telegram_report
 from src.db.dao import insert_changes, insert_report
@@ -52,5 +54,34 @@ def compare_latest(data_root: str, *, gazetteer_csv: Optional[str] = None) -> li
         all_items.extend(items)
 
     # sort aggregated by area desc
+    all_items.sort(key=lambda x: x["area_km2"], reverse=True)
+    return all_items
+
+
+def compare_dates(data_root: str, date1: str, date2: str, *, clazzes: tuple[str, ...] = CLASSES, gazetteer_csv: Optional[str] = None) -> list[ChangeItem]:
+    """Compare snapshots for two конкретных дат (формат YYYY_MM_DD) по указанным классам."""
+    all_items: list[ChangeItem] = []
+    gaz_gdf = load_gazetteer_csv(gazetteer_csv) if gazetteer_csv else None
+
+    for clazz in clazzes:
+        p1 = Path(data_root) / "history" / date1[:4] / date1[5:7] / f"layer_{clazz}_{date1}.geojson"
+        p2 = Path(data_root) / "history" / date2[:4] / date2[5:7] / f"layer_{clazz}_{date2}.geojson"
+        if not (p1.exists() and p2.exists()):
+            # пропустить, если файлов нет
+            continue
+        items = compute_changes(str(p1), str(p2))
+        for it in items:
+            lon, lat = it["centroid"]
+            name = None
+            if gaz_gdf is not None:
+                res = nearest_from_gazetteer(lon, lat, gaz_gdf)
+                if res:
+                    name = res[0]
+            if not name:
+                name = reverse_geocode_geopy(lon, lat) or ""
+            it["settlement"] = name
+            it["direction"] = clazz
+        all_items.extend(items)
+
     all_items.sort(key=lambda x: x["area_km2"], reverse=True)
     return all_items
