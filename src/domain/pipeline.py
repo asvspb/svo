@@ -1,15 +1,11 @@
 from __future__ import annotations
-from typing import Iterable, Optional
-from pathlib import Path
-import re
-import json
 
-from src.domain.geo_changes import compute_changes, ChangeItem
-from src.data_io.history_index import load_index
-from src.data_io.history_fetcher import fetch_history_layer, save_layer_geojson
+import re
+from pathlib import Path
+
+from src.db.dao import get_layer_geojson_text
+from src.domain.geo_changes import ChangeItem, compute_changes
 from src.domain.nearest import load_gazetteer_csv, nearest_from_gazetteer, reverse_geocode_geopy
-from src.reporting.report_generator import build_telegram_report
-from src.db.dao import insert_changes, insert_report
 
 CLASSES = ("occupied", "gray")
 
@@ -21,7 +17,7 @@ def _find_layer_files(root: str, clazz: str) -> list[Path]:
     return sorted(files)
 
 
-def compare_latest(data_root: str, *, gazetteer_csv: Optional[str] = None) -> list[ChangeItem]:
+def compare_latest(data_root: str, *, gazetteer_csv: str | None = None) -> list[ChangeItem]:
     """Compare the two latest dates per class (occupied/gray) and return merged changes.
 
     - Looks for files named layer_<class>_YYYY_MM_DD.geojson under data_root/ (any subfolders)
@@ -58,8 +54,55 @@ def compare_latest(data_root: str, *, gazetteer_csv: Optional[str] = None) -> li
     return all_items
 
 
-def compare_dates(data_root: str, date1: str, date2: str, *, clazzes: tuple[str, ...] = CLASSES, gazetteer_csv: Optional[str] = None) -> list[ChangeItem]:
-    """Compare snapshots for two конкретных дат (формат YYYY_MM_DD) по указанным классам."""
+def compare_dates_db(
+    date1: str,
+    date2: str,
+    *,
+    clazzes: tuple[str, ...] = CLASSES,
+    gazetteer_csv: str | None = None,
+    min_area_km2: float = 0.01,
+) -> list[ChangeItem]:
+    """Compare two dates using layers stored in DB (no filesystem, no primary source).
+
+    Dates are in format YYYY_MM_DD.
+    """
+    from datetime import datetime as _dt
+
+    d1 = _dt.strptime(date1, "%Y_%m_%d").date()
+    d2 = _dt.strptime(date2, "%Y_%m_%d").date()
+
+    all_items: list[ChangeItem] = []
+    gaz_gdf = load_gazetteer_csv(gazetteer_csv) if gazetteer_csv else None
+
+    for clazz in clazzes:
+        t1 = get_layer_geojson_text(clazz=clazz, d=d1)
+        t2 = get_layer_geojson_text(clazz=clazz, d=d2)
+        if not t1 or not t2:
+            continue
+        items = compute_changes(t1, t2, min_area_km2=min_area_km2)
+        for it in items:
+            lon, lat = it["centroid"]
+            name = None
+            if gaz_gdf is not None:
+                res = nearest_from_gazetteer(lon, lat, gaz_gdf)
+                if res:
+                    name = res[0]
+            if not name:
+                name = reverse_geocode_geopy(lon, lat) or ""
+            it["settlement"] = name
+            it["direction"] = clazz
+        all_items.extend(items)
+
+    all_items.sort(key=lambda x: x["area_km2"], reverse=True)
+    return all_items
+
+
+def compare_dates(data_root: str, date1: str, date2: str, *, clazzes: tuple[str, ...] = CLASSES, gazetteer_csv: str | None = None) -> list[ChangeItem]:
+    """Compare snapshots for two конкретных дат (формат YYYY_MM_DD) по указанным классам.
+
+    This function reads layers from the filesystem cache (data_root/history/...).
+    For DB-backed comparison, use `compare_dates_db`.
+    """
     all_items: list[ChangeItem] = []
     gaz_gdf = load_gazetteer_csv(gazetteer_csv) if gazetteer_csv else None
 

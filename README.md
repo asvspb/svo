@@ -48,6 +48,21 @@ python scripts/backfill_layers.py --days 7 --create-tables --skip-existing
 python scripts/backfill_layers.py --days 30 --classes occupied,gray --create-tables --skip-existing
 ```
 
+3) Постройте отчёт за две даты, читая слои из БД (без файлов/первоисточника):
+```bash
+python scripts/generate_report_db.py --from 2024_01_01 --to 2024_01_02 --classes occupied,gray
+
+# сохранить текст отчёта в таблицу reports (для конечной даты)
+python scripts/generate_report_db.py --from 2024_01_01 --to 2024_01_02 --classes occupied,gray --store
+```
+
+4) Постройте отчёт за период (день-за-днём + итог):
+```bash
+python scripts/generate_period_report_db.py --from 2024_01_01 --to 2024_01_31 --classes occupied,gray --top-n 10
+```
+
+Примечание: периодный отчёт использует только те даты, которые реально присутствуют в таблице `layers`.
+
 Подключение к БД:
 - по умолчанию используется MySQL из переменных `MYSQL_*`
 - либо можно указать `DATABASE_URL` (например, SQLite):

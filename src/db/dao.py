@@ -1,16 +1,18 @@
 from __future__ import annotations
+
 import gzip
 import hashlib
 import json
+from collections.abc import Iterable
 from datetime import date
-from pathlib import Path
-from typing import Iterable, Optional
 
-from sqlalchemy import select, insert
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from src.domain.geo_changes import ChangeItem
+
 from .base import get_session_maker
-from .models import DateRef, Layer, Change, Report
+from .models import Change, DateRef, Layer, Report
 
 
 def _get_date_id(sess: Session, d: date) -> int | None:
@@ -27,7 +29,22 @@ def layer_exists(*, clazz: str, d: date) -> bool:
             return False
         row = sess.execute(select(Layer.id).where(Layer.date_id == did, Layer.clazz == clazz)).scalar_one_or_none()
         return row is not None
-from src.domain.geo_changes import ChangeItem
+
+
+def get_layer_geojson_text(*, clazz: str, d: date) -> str | None:
+    """Load gzipped GeoJSON from DB and return as text."""
+    SessionLocal = get_session_maker()
+    with SessionLocal() as sess:
+        did = _get_date_id(sess, d)
+        if did is None:
+            return None
+        row = sess.execute(select(Layer.geojson).where(Layer.date_id == did, Layer.clazz == clazz)).scalar_one_or_none()
+        if row is None:
+            return None
+        try:
+            return gzip.decompress(row).decode("utf-8")
+        except Exception:
+            return None
 
 
 def _ensure_date(sess: Session, d: date) -> int:
@@ -45,8 +62,8 @@ def upsert_layer(
     clazz: str,
     d: date,
     geojson_text: str,
-    source_url: Optional[str] = None,
-    features_count: Optional[int] = None,
+    source_url: str | None = None,
+    features_count: int | None = None,
 ) -> int:
     """Store layer GeoJSON (gzipped) with idempotency via checksum."""
     SessionLocal = get_session_maker()
@@ -130,10 +147,25 @@ def insert_report(*, date_curr: date, text: str, top3: list[ChangeItem] | None =
         return obj.id  # type: ignore[attr-defined]
 
 
-def get_latest_report() -> Optional[str]:
+def get_latest_report() -> str | None:
     SessionLocal = get_session_maker()
     with SessionLocal() as sess:
         row = sess.execute(
             select(Report.text).order_by(Report.id.desc()).limit(1)
         ).scalar_one_or_none()
         return row
+
+
+def list_layer_dates(*, clazz: str | None = None) -> list[date]:
+    """List distinct dates that have layers in DB.
+
+    If `clazz` is provided, only dates that have that layer class are returned.
+    """
+    SessionLocal = get_session_maker()
+    with SessionLocal() as sess:
+        stmt = select(DateRef.date).join(Layer, Layer.date_id == DateRef.id)
+        if clazz is not None:
+            stmt = stmt.where(Layer.clazz == clazz)
+        stmt = stmt.distinct().order_by(DateRef.date.asc())
+        rows = sess.execute(stmt).scalars().all()
+        return list(rows)
