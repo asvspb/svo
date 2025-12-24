@@ -43,6 +43,7 @@ def compare_latest(data_root: str, *, gazetteer_csv: str | None = None) -> list[
                 res = nearest_from_gazetteer(lon, lat, gaz_gdf)
                 if res:
                     name = res[0]
+                    it["settlement_distance_km"] = float(res[1])
             if not name:
                 name = reverse_geocode_geopy(lon, lat) or ""
             it["settlement"] = name
@@ -61,6 +62,7 @@ def compare_dates_db(
     clazzes: tuple[str, ...] = CLASSES,
     gazetteer_csv: str | None = None,
     min_area_km2: float = 0.01,
+    cluster_distance_km: float | None = 1.0,
 ) -> list[ChangeItem]:
     """Compare two dates using layers stored in DB (no filesystem, no primary source).
 
@@ -79,7 +81,12 @@ def compare_dates_db(
         t2 = get_layer_geojson_text(clazz=clazz, d=d2)
         if not t1 or not t2:
             continue
-        items = compute_changes(t1, t2, min_area_km2=min_area_km2)
+        items = compute_changes(
+            t1,
+            t2,
+            min_area_km2=min_area_km2,
+            cluster_distance_km=cluster_distance_km,
+        )
         for it in items:
             lon, lat = it["centroid"]
             name = None
@@ -87,6 +94,7 @@ def compare_dates_db(
                 res = nearest_from_gazetteer(lon, lat, gaz_gdf)
                 if res:
                     name = res[0]
+                    it["settlement_distance_km"] = float(res[1])
             if not name:
                 name = reverse_geocode_geopy(lon, lat) or ""
             it["settlement"] = name
@@ -120,6 +128,7 @@ def compare_dates(data_root: str, date1: str, date2: str, *, clazzes: tuple[str,
                 res = nearest_from_gazetteer(lon, lat, gaz_gdf)
                 if res:
                     name = res[0]
+                    it["settlement_distance_km"] = float(res[1])
             if not name:
                 name = reverse_geocode_geopy(lon, lat) or ""
             it["settlement"] = name

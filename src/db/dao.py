@@ -6,13 +6,14 @@ import json
 from collections.abc import Iterable
 from datetime import date
 
+import sqlalchemy as sa
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.domain.geo_changes import ChangeItem
 
 from .base import get_session_maker
-from .models import Change, DateRef, Layer, Report
+from .models import Change, ChangeSummary, DateRef, Layer, Report
 
 
 def _get_date_id(sess: Session, d: date) -> int | None:
@@ -154,6 +155,95 @@ def get_latest_report() -> str | None:
             select(Report.text).order_by(Report.id.desc()).limit(1)
         ).scalar_one_or_none()
         return row
+
+
+def upsert_change_summary(
+    *,
+    clazz: str,
+    date_prev: date,
+    date_curr: date,
+    gained_km2: float,
+    lost_km2: float,
+    top_items: list[ChangeItem],
+) -> int:
+    """Upsert cached summary for a (prev,curr,clazz) pair."""
+    SessionLocal = get_session_maker()
+    with SessionLocal() as sess:
+        dprev_id = _ensure_date(sess, date_prev)
+        dcurr_id = _ensure_date(sess, date_curr)
+        existing = sess.execute(
+            select(ChangeSummary).where(
+                ChangeSummary.date_prev_id == dprev_id,
+                ChangeSummary.date_curr_id == dcurr_id,
+                ChangeSummary.clazz == clazz,
+            )
+        ).scalar_one_or_none()
+        payload = json.dumps(top_items, ensure_ascii=False)
+        if existing:
+            existing.gained_km2 = float(gained_km2)  # type: ignore[assignment]
+            existing.lost_km2 = float(lost_km2)  # type: ignore[assignment]
+            existing.top_json = payload  # type: ignore[assignment]
+            sess.commit()
+            return existing.id  # type: ignore[attr-defined]
+        obj = ChangeSummary(
+            date_prev_id=dprev_id,
+            date_curr_id=dcurr_id,
+            clazz=clazz,
+            gained_km2=float(gained_km2),
+            lost_km2=float(lost_km2),
+            top_json=payload,
+        )
+        sess.add(obj)
+        sess.commit()
+        return obj.id  # type: ignore[attr-defined]
+
+
+def get_change_summary(
+    *, clazz: str, date_prev: date, date_curr: date
+) -> tuple[float, float, list[ChangeItem]] | None:
+    """Get cached summary (gained, lost, top_items)."""
+    SessionLocal = get_session_maker()
+    with SessionLocal() as sess:
+        dprev_id = _get_date_id(sess, date_prev)
+        dcurr_id = _get_date_id(sess, date_curr)
+        if dprev_id is None or dcurr_id is None:
+            return None
+        row = sess.execute(
+            select(ChangeSummary.gained_km2, ChangeSummary.lost_km2, ChangeSummary.top_json).where(
+                ChangeSummary.date_prev_id == dprev_id,
+                ChangeSummary.date_curr_id == dcurr_id,
+                ChangeSummary.clazz == clazz,
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+        gained, lost, top_json = row
+        top_items: list[ChangeItem] = []
+        if top_json:
+            try:
+                top_items = json.loads(top_json)
+            except Exception:
+                top_items = []
+        return float(gained), float(lost), top_items
+
+
+def list_cached_pairs(*, date_from: date, date_to: date) -> list[tuple[date, date]]:
+    """List distinct (prev_date, curr_date) pairs available in change_summaries within range."""
+    SessionLocal = get_session_maker()
+    with SessionLocal() as sess:
+        # Join twice to dates
+        prev = sa.orm.aliased(DateRef)
+        curr = sa.orm.aliased(DateRef)
+        stmt = (
+            select(prev.date, curr.date)
+            .select_from(ChangeSummary)
+            .join(prev, prev.id == ChangeSummary.date_prev_id)
+            .join(curr, curr.id == ChangeSummary.date_curr_id)
+            .where(curr.date >= date_from, curr.date <= date_to)
+            .distinct()
+            .order_by(prev.date.asc(), curr.date.asc())
+        )
+        return list(sess.execute(stmt).all())
 
 
 def list_layer_dates(*, clazz: str | None = None) -> list[date]:

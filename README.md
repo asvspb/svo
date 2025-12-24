@@ -59,9 +59,17 @@ python scripts/generate_report_db.py --from 2024_01_01 --to 2024_01_02 --classes
 4) Постройте отчёт за период (день-за-днём + итог):
 ```bash
 python scripts/generate_period_report_db.py --from 2024_01_01 --to 2024_01_31 --classes occupied,gray --top-n 10
+
+# игнорировать кэш и пересчитать по слоям (перезапишет кэш)
+python scripts/generate_period_report_db.py --from 2024_01_01 --to 2024_01_31 --classes occupied,gray --recompute
+
+# запретить чтение/запись кэша (только по слоям)
+python scripts/generate_period_report_db.py --from 2024_01_01 --to 2024_01_31 --classes occupied,gray --no-cache
 ```
 
-Примечание: периодный отчёт использует только те даты, которые реально присутствуют в таблице `layers`.
+Кэширование: при построении периодного отчёта результаты day-to-day сравнения (итоги gained/lost и TOP патчи) сохраняются в `change_summaries`. Это ускоряет повторные отчёты.
+
+Примечание: периодный отчёт использует только те даты, которые реально присутствуют в таблице `layers` (или пары дат из `change_summaries`, если слоёв нет).
 
 Подключение к БД:
 - по умолчанию используется MySQL из переменных `MYSQL_*`

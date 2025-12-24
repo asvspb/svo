@@ -51,6 +51,23 @@ class Change(Base):
     )
 
 
+class ChangeSummary(Base):
+    __tablename__ = "change_summaries"
+    id: Mapped[int] = mapped_column(ID_BIGINT, primary_key=True, autoincrement=True)
+    date_prev_id: Mapped[int] = mapped_column(ID_BIGINT, ForeignKey("dates.id"), nullable=False)
+    date_curr_id: Mapped[int] = mapped_column(ID_BIGINT, ForeignKey("dates.id"), nullable=False)
+    clazz: Mapped[str] = mapped_column(Enum("occupied", "gray", "frontline", name="layer_class"), nullable=False)
+    gained_km2: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    lost_km2: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    top_json: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[str] = mapped_column(DateTime, server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("date_prev_id", "date_curr_id", "clazz", name="uk_change_summary_pair_class"),
+        Index("idx_change_summaries_curr_class", "date_curr_id", "clazz"),
+    )
+
+
 class Report(Base):
     __tablename__ = "reports"
     id: Mapped[int] = mapped_column(ID_BIGINT, primary_key=True, autoincrement=True)
